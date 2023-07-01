@@ -64,8 +64,10 @@ export const useWhisper: UseWhisperHook = (config) => {
     streaming,
     timeSlice,
     whisperConfig,
+    onStartRecording: onStartRecordingCallback,
     onDataAvailable: onDataAvailableCallback,
     onTranscribe: onTranscribeCallback,
+    onTranscribeFinished: onTranscribeFinishedCallback,
   } = {
     ...defaultConfig,
     ...config,
@@ -147,6 +149,10 @@ export const useWhisper: UseWhisperHook = (config) => {
     await onPauseRecording()
   }
 
+  const reset = async () => {
+    await onReset()
+  }
+
   /**
    * stop speech recording and start the transcription
    */
@@ -202,6 +208,7 @@ export const useWhisper: UseWhisperHook = (config) => {
         if (nonStop) {
           onStartTimeout('stop')
         }
+        onStartRecordingCallback?.(stream.current)
         setRecording(true)
       }
     } catch (err) {
@@ -284,6 +291,23 @@ export const useWhisper: UseWhisperHook = (config) => {
           await recorder.current.pauseRecording()
         }
         onStopTimeout('stop')
+        setRecording(false)
+      }
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  const onReset = async () => {
+    try {
+      if (recorder.current) {
+        const recordState = await recorder.current.getState()
+        if (recordState === 'recording' || recordState === 'paused') {
+          await recorder.current.reset()
+        }
+        if (nonStop) {
+          onStartTimeout('stop')
+        }
         setRecording(false)
       }
     } catch (err) {
@@ -428,18 +452,27 @@ export const useWhisper: UseWhisperHook = (config) => {
             blob = new Blob([mp3], { type: 'audio/mpeg' })
             console.log({ blob, mp3: mp3.byteLength })
           }
+          setTranscript({
+            blob,
+          })
           if (typeof onTranscribeCallback === 'function') {
             const transcribed = await onTranscribeCallback(blob)
             console.log('onTranscribe', transcribed)
             setTranscript(transcribed)
+            if (typeof onTranscribeFinishedCallback === 'function') {
+              onTranscribeFinishedCallback(transcribed.text || '', blob)
+            }
           } else {
             const file = new File([blob], 'speech.mp3', { type: 'audio/mpeg' })
             const text = await onWhispered(file)
             console.log('onTranscribing', { text })
             setTranscript({
-              blob,
               text,
             })
+
+            if (typeof onTranscribeFinishedCallback === 'function') {
+              onTranscribeFinishedCallback(text || '', blob)
+            }
           }
           setTranscribing(false)
         }
@@ -469,7 +502,8 @@ export const useWhisper: UseWhisperHook = (config) => {
         }
         const recorderState = await recorder.current.getState()
         if (recorderState === 'recording') {
-          const blob = new Blob(chunks.current, {
+          // 切割音频后5块数据
+          const blob = new Blob(chunks.current.slice(-5), {
             type: 'audio/mpeg',
           })
           const file = new File([blob], 'speech.mp3', {
@@ -519,7 +553,8 @@ export const useWhisper: UseWhisperHook = (config) => {
         headers['Authorization'] = `Bearer ${apiKey}`
       }
       const { default: axios } = await import('axios')
-      const response = await axios.post(whisperApiEndpoint + mode, body, {
+      const endpoint = whisperConfig?.endpoint ?? whisperApiEndpoint
+      const response = await axios.post(endpoint + mode, body, {
         headers,
       })
       return response.data.text
@@ -535,5 +570,6 @@ export const useWhisper: UseWhisperHook = (config) => {
     pauseRecording,
     startRecording,
     stopRecording,
+    reset,
   }
 }

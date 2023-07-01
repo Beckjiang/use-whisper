@@ -1,4 +1,5 @@
 export type UseWhisperConfig = {
+  apiEndpoint?: string
   apiKey?: string
   autoStart?: boolean
   autoTranscribe?: boolean
@@ -9,8 +10,10 @@ export type UseWhisperConfig = {
   streaming?: boolean
   timeSlice?: number
   whisperConfig?: WhisperApiConfig
+  onStartRecording?: (stream: MediaStream) => void
   onDataAvailable?: (blob: Blob) => void
   onTranscribe?: (blob: Blob) => Promise<UseWhisperTranscript>
+  onTranscribeFinished?: (text: any, blob: Blob) => void
 }
 
 export type UseWhisperTimeout = {
@@ -30,6 +33,7 @@ export type UseWhisperReturn = {
   pauseRecording: () => Promise<void>
   startRecording: () => Promise<void>
   stopRecording: () => Promise<void>
+  reset: () => Promise<void>
 }
 
 export type UseWhisperHook = (config?: UseWhisperConfig) => UseWhisperReturn
@@ -40,4 +44,5 @@ export type WhisperApiConfig = {
   response_format?: 'json' | 'text' | 'srt' | 'verbose_json' | 'vtt'
   temperature?: number
   language?: string
+  endpoint?: string
 }
