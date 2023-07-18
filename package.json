@@ -1,6 +1,6 @@
 {
   "name": "@beckjiang/use-whisper",
-  "version": "0.2.4",
+  "version": "0.2.17",
   "description": "React Hook for OpenAI Whisper API with speech recorder and silence removal built-in.",
   "keywords": [
     "react",
@@ -17,11 +17,11 @@
     "remove",
     "removal"
   ],
-  "homepage": "https://github.com/chengsokdara/use-whisper#readme",
-  "bugs": "https://github.com/chengsokdara/use-whisper/issues",
+  "homepage": "https://github.com/beckjiang/use-whisper#readme",
+  "bugs": "https://github.com/beckjiang/use-whisper/issues",
   "license": "MIT",
   "author": "Beck Jiang <beckjiang.fun@gmail.com> (https://beckjiang.github.io)",
-  "repository": "github:chengsokdara/use-whisper",
+  "repository": "github:beckjiang/use-whisper",
   "scripts": {
     "dev": "env NODE_ENV=development tsup",
     "build": "env NODE_ENV=production tsup",

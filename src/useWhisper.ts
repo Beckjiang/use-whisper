@@ -11,6 +11,7 @@ import {
   whisperApiEndpoint,
 } from './configs'
 import {
+  Segment,
   UseWhisperConfig,
   UseWhisperHook,
   UseWhisperTimeout,
@@ -24,12 +25,14 @@ const defaultConfig: UseWhisperConfig = {
   apiKey: '',
   autoStart: false,
   autoTranscribe: true,
+  autoTranscribeOnStop: true,
   mode: 'transcriptions',
   nonStop: false,
   removeSilence: false,
   stopTimeout: defaultStopTimeout,
   streaming: false,
   timeSlice: 1_000,
+  transcribeSliceCount: 10,
   onDataAvailable: undefined,
   onTranscribe: undefined,
 }
@@ -49,6 +52,13 @@ const defaultTranscript: UseWhisperTranscript = {
   text: undefined,
 }
 
+const fileTypeExtMap = {
+  'audio/webm': 'webm',
+  'audio/ogg': 'ogg',
+  'audio/wav': 'wav',
+  'audio/mpeg': 'mp3',
+}
+
 /**
  * React Hook for OpenAI Whisper
  */
@@ -57,12 +67,14 @@ export const useWhisper: UseWhisperHook = (config) => {
     apiKey,
     autoStart,
     autoTranscribe,
+    autoTranscribeOnStop,
     mode,
     nonStop,
     removeSilence,
     stopTimeout,
     streaming,
     timeSlice,
+    transcribeSliceCount,
     whisperConfig,
     onStartRecording: onStartRecordingCallback,
     onDataAvailable: onDataAvailableCallback,
@@ -89,6 +101,9 @@ export const useWhisper: UseWhisperHook = (config) => {
   const [transcribing, setTranscribing] = useState<boolean>(false)
   const [transcript, setTranscript] =
     useState<UseWhisperTranscript>(defaultTranscript)
+
+  const workerRef = useRef<Worker | null>(null)
+  const sliceNums = useRef<number>(1)
 
   /**
    * cleanup on component unmounted
@@ -121,6 +136,9 @@ export const useWhisper: UseWhisperHook = (config) => {
       if (stream.current) {
         stream.current.getTracks().forEach((track) => track.stop())
         stream.current = undefined
+      }
+      if (workerRef.current) {
+        workerRef.current.terminate()
       }
     }
   }, [])
@@ -197,6 +215,12 @@ export const useWhisper: UseWhisperHook = (config) => {
         if (!encoder.current) {
           const { Mp3Encoder } = await import('lamejs')
           encoder.current = new Mp3Encoder(1, 44100, 96)
+        }
+        if (!workerRef.current) {
+          workerRef.current = new Worker(
+            new URL('./worker.js', import.meta.url)
+          )
+          workerRef.current.postMessage({ command: 'init' })
         }
         const recordState = await recorder.current.getState()
         if (recordState === 'inactive' || recordState === 'stopped') {
@@ -335,13 +359,16 @@ export const useWhisper: UseWhisperHook = (config) => {
         onStopStreaming()
         onStopTimeout('stop')
         setRecording(false)
-        if (autoTranscribe) {
+        if (autoTranscribeOnStop) {
           await onTranscribing()
         } else {
           const blob = await recorder.current.getBlob()
           setTranscript({
             blob,
           })
+          if (typeof onTranscribeFinishedCallback === 'function') {
+            onTranscribeFinishedCallback('', blob)
+          }
         }
         await recorder.current.destroy()
         chunks.current = []
@@ -385,6 +412,38 @@ export const useWhisper: UseWhisperHook = (config) => {
       clearTimeout(timeout.current[type])
       timeout.current[type] = undefined
     }
+  }
+
+  const doTranscribing = async (blob: Blob, type?: string) => {
+    setTranscript({
+      blob,
+    })
+    let text = ''
+    if (typeof onTranscribeCallback === 'function') {
+      const transcribed = await onTranscribeCallback(blob)
+      console.log('onTranscribe', transcribed)
+      setTranscript(transcribed)
+      if (typeof onTranscribeFinishedCallback === 'function') {
+        onTranscribeFinishedCallback(transcribed.text || '', blob)
+      }
+      text = transcribed.text || ''
+    } else {
+      const fileType = type || 'audio/mpeg'
+      const fileExt = fileTypeExtMap[fileType]
+
+      const file = new File([blob], 'speech.' + fileExt, { type: fileType })
+      text = await onWhispered(file)
+      console.log('onTranscribing', { text })
+      setTranscript({
+        text,
+      })
+
+      if (typeof onTranscribeFinishedCallback === 'function') {
+        onTranscribeFinishedCallback(text || '', blob)
+      }
+    }
+    setTranscribing(false)
+    return text || ''
   }
 
   /**
@@ -445,36 +504,33 @@ export const useWhisper: UseWhisperHook = (config) => {
             }
             blob = new Blob([out.buffer], { type: 'audio/mpeg' })
             ffmpeg.exit()
+
+            await doTranscribing(blob)
           } else {
             const buffer = await blob.arrayBuffer()
             console.log({ wav: buffer.byteLength })
-            const mp3 = encoder.current.encodeBuffer(new Int16Array(buffer))
-            blob = new Blob([mp3], { type: 'audio/mpeg' })
-            console.log({ blob, mp3: mp3.byteLength })
-          }
-          setTranscript({
-            blob,
-          })
-          if (typeof onTranscribeCallback === 'function') {
-            const transcribed = await onTranscribeCallback(blob)
-            console.log('onTranscribe', transcribed)
-            setTranscript(transcribed)
-            if (typeof onTranscribeFinishedCallback === 'function') {
-              onTranscribeFinishedCallback(transcribed.text || '', blob)
-            }
-          } else {
-            const file = new File([blob], 'speech.mp3', { type: 'audio/mpeg' })
-            const text = await onWhispered(file)
-            console.log('onTranscribing', { text })
-            setTranscript({
-              text,
-            })
+            let mp3: Int8Array | undefined = undefined
+            if (workerRef.current) {
+              workerRef.current.postMessage({ command: 'encode', data: buffer })
 
-            if (typeof onTranscribeFinishedCallback === 'function') {
-              onTranscribeFinishedCallback(text || '', blob)
+              workerRef.current.onmessage = (event) => {
+                const mp3 = event.data
+                const blob = new Blob([mp3], { type: 'audio/mpeg' })
+                // ...后续操作
+                doTranscribing(blob).then(() => {
+                  console.log(
+                    'after workerRef.current.onmessage doTranscribing'
+                  )
+                })
+              }
+            } else {
+              mp3 = encoder.current.encodeBuffer(new Int16Array(buffer))
+              blob = new Blob([mp3], { type: 'audio/mpeg' })
+              console.log({ blob, mp3: mp3.byteLength })
+              await doTranscribing(blob)
+              console.log('after encoder.current.encodeBuffer doTranscribing')
             }
           }
-          setTranscribing(false)
         }
       }
     } catch (err) {
@@ -490,7 +546,8 @@ export const useWhisper: UseWhisperHook = (config) => {
    * - set transcript text with interim result
    */
   const onDataAvailable = async (data: Blob) => {
-    console.log('onDataAvailable', data)
+    const nums = sliceNums.current++
+    console.log('onDataAvailable', data, nums)
     try {
       if (streaming && recorder.current) {
         onDataAvailableCallback?.(data)
@@ -502,20 +559,64 @@ export const useWhisper: UseWhisperHook = (config) => {
         }
         const recorderState = await recorder.current.getState()
         if (recorderState === 'recording') {
+          const sliceCount = transcribeSliceCount || 10
           // 切割音频后5块数据
-          const blob = new Blob(chunks.current.slice(-5), {
+          const blob = new Blob(chunks.current.slice(-1 * sliceCount), {
             type: 'audio/mpeg',
           })
           const file = new File([blob], 'speech.mp3', {
             type: 'audio/mpeg',
           })
           const text = await onWhispered(file)
-          console.log('onInterim', { text })
-          if (text) {
-            setTranscript((prev) => ({ ...prev, text }))
+          // console.log('onInterim', { text })
+          let segment: Segment | null = null
+          if (text && timeSlice) {
+            if (timeSlice) {
+              /* 
+              timeSlice = 2000
+              transcribeSliceCount = 5
+
+              index  start  end
+              1       0     2000
+              2       0     4000
+              3       0     6000
+              4       0     8000
+              5       0     10000
+              6       2000  12000
+              7       4000  14000
+              8       6000  16000
+              9       8000  18000
+              10      10000 20000
+              */
+
+              const end = nums * timeSlice
+              // start 最小为0
+              const start = Math.max(0, end - sliceCount * timeSlice)
+              segment = {
+                start,
+                end,
+                text,
+              }
+            }
+
+            console.log('onInterim', { text, segment })
+
+            setTranscript((prev) => ({
+              ...prev,
+              text,
+              segment: segment ? segment : prev.segment,
+            }))
           }
         }
       }
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  const transcribeFileBlob = async (blob: Blob, type: string) => {
+    try {
+      return doTranscribing(blob, type)
     } catch (err) {
       console.error(err)
     }
@@ -571,5 +672,6 @@ export const useWhisper: UseWhisperHook = (config) => {
     startRecording,
     stopRecording,
     reset,
+    transcribeFileBlob
   }
 }

@@ -3,12 +3,14 @@ export type UseWhisperConfig = {
   apiKey?: string
   autoStart?: boolean
   autoTranscribe?: boolean
+  autoTranscribeOnStop?: boolean
   mode?: 'transcriptions' | 'translations'
   nonStop?: boolean
   removeSilence?: boolean
   stopTimeout?: number
   streaming?: boolean
   timeSlice?: number
+  transcribeSliceCount?: number
   whisperConfig?: WhisperApiConfig
   onStartRecording?: (stream: MediaStream) => void
   onDataAvailable?: (blob: Blob) => void
@@ -20,9 +22,16 @@ export type UseWhisperTimeout = {
   stop?: NodeJS.Timeout
 }
 
+export type Segment = {
+  start: number // in milliseconds
+  end: number
+  text: string
+}
+
 export type UseWhisperTranscript = {
   blob?: Blob
   text?: string
+  segment?: Segment
 }
 
 export type UseWhisperReturn = {
@@ -34,6 +43,7 @@ export type UseWhisperReturn = {
   startRecording: () => Promise<void>
   stopRecording: () => Promise<void>
   reset: () => Promise<void>
+  transcribeFileBlob: (blob: Blob, type: string) => Promise<string|undefined>
 }
 
 export type UseWhisperHook = (config?: UseWhisperConfig) => UseWhisperReturn
