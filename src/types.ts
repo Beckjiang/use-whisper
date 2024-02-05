@@ -29,9 +29,12 @@ export type Segment = {
 }
 
 export type UseWhisperTranscript = {
+  start?: number
+  end?: number
   blob?: Blob
   text?: string
   segment?: Segment
+  stopped?: boolean
 }
 
 export type UseWhisperReturn = {
@@ -43,7 +46,7 @@ export type UseWhisperReturn = {
   startRecording: () => Promise<void>
   stopRecording: () => Promise<void>
   reset: () => Promise<void>
-  transcribeFileBlob: (blob: Blob, type: string) => Promise<string|undefined>
+  transcribeFileBlob: (blob: Blob, type: string) => Promise<string | undefined>
 }
 
 export type UseWhisperHook = (config?: UseWhisperConfig) => UseWhisperReturn

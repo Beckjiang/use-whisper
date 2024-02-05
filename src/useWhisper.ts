@@ -104,6 +104,9 @@ export const useWhisper: UseWhisperHook = (config) => {
 
   const workerRef = useRef<Worker | null>(null)
   const sliceNums = useRef<number>(1)
+  const currentSection = useRef<Blob[]>([])
+  const elapsedTime = useRef<number>(0)
+  const startTime = useRef<number>(0)
 
   /**
    * cleanup on component unmounted
@@ -234,6 +237,7 @@ export const useWhisper: UseWhisperHook = (config) => {
         }
         onStartRecordingCallback?.(stream.current)
         setRecording(true)
+        startTime.current = Date.now()
       }
     } catch (err) {
       console.error(err)
@@ -285,6 +289,13 @@ export const useWhisper: UseWhisperHook = (config) => {
   const onStartSpeaking = () => {
     console.log('start speaking')
     setSpeaking(true)
+    const currentRecordingTime = getCurrentRecordingTime()
+    setTranscript((prev) => {
+      return {
+        ...prev,
+        start: currentRecordingTime,
+      }
+    })
     onStopTimeout('stop')
   }
 
@@ -296,6 +307,15 @@ export const useWhisper: UseWhisperHook = (config) => {
   const onStopSpeaking = () => {
     console.log('stop speaking')
     setSpeaking(false)
+    const copy_section = currentSection.current.slice()
+    const data = new Blob(copy_section, {
+      type: 'audio/mpeg',
+    })
+
+    doTranscribing(data).then(() => {
+      console.log('after onStopSpeaking doTranscribing')
+    })
+
     if (nonStop) {
       onStartTimeout('stop')
     }
@@ -311,6 +331,9 @@ export const useWhisper: UseWhisperHook = (config) => {
     try {
       if (recorder.current) {
         const recordState = await recorder.current.getState()
+        if (recording) {
+          elapsedTime.current += Date.now() - startTime.current
+        }
         if (recordState === 'recording') {
           await recorder.current.pauseRecording()
         }
@@ -322,10 +345,23 @@ export const useWhisper: UseWhisperHook = (config) => {
     }
   }
 
+  const getCurrentRecordingTime = () => {
+    if (recording) {
+      // 如果正在录音，计算当前段的持续时间并加到总时间
+      return elapsedTime.current + (Date.now() - startTime.current)
+    } else {
+      // 如果不在录音，返回已录制的总时间
+      return elapsedTime
+    }
+  }
+
   const onReset = async () => {
     try {
       if (recorder.current) {
         const recordState = await recorder.current.getState()
+        if (recording) {
+          elapsedTime.current += Date.now() - startTime.current
+        }
         if (recordState === 'recording' || recordState === 'paused') {
           await recorder.current.reset()
         }
@@ -353,6 +389,9 @@ export const useWhisper: UseWhisperHook = (config) => {
     try {
       if (recorder.current) {
         const recordState = await recorder.current.getState()
+        if (recording) {
+          elapsedTime.current += Date.now() - startTime.current
+        }
         if (recordState === 'recording' || recordState === 'paused') {
           await recorder.current.stopRecording()
         }
@@ -415,9 +454,10 @@ export const useWhisper: UseWhisperHook = (config) => {
   }
 
   const doTranscribing = async (blob: Blob, type?: string) => {
-    setTranscript({
+    setTranscript((prev) => ({
+      ...prev,
       blob,
-    })
+    }))
     let text = ''
     if (typeof onTranscribeCallback === 'function') {
       const transcribed = await onTranscribeCallback(blob)
@@ -432,7 +472,8 @@ export const useWhisper: UseWhisperHook = (config) => {
       const fileExt = fileTypeExtMap[fileType]
 
       const file = new File([blob], 'speech.' + fileExt, { type: fileType })
-      text = await onWhispered(file)
+      const transcribeResult = await onWhispered(file)
+      text = transcribeResult.text || ''
       console.log('onTranscribing', { text })
       setTranscript({
         text,
@@ -556,12 +597,13 @@ export const useWhisper: UseWhisperHook = (config) => {
           const mp3chunk = encoder.current.encodeBuffer(new Int16Array(buffer))
           const mp3blob = new Blob([mp3chunk], { type: 'audio/mpeg' })
           chunks.current.push(mp3blob)
+          currentSection.current.push(mp3blob)
         }
         const recorderState = await recorder.current.getState()
         if (recorderState === 'recording') {
           const sliceCount = transcribeSliceCount || 10
           // 切割音频后5块数据
-          const blob = new Blob(chunks.current.slice(-1 * sliceCount), {
+          const blob = new Blob(currentSection.current, {
             type: 'audio/mpeg',
           })
           const file = new File([blob], 'speech.mp3', {
@@ -596,6 +638,7 @@ export const useWhisper: UseWhisperHook = (config) => {
                 start,
                 end,
                 text,
+                stopped: false,
               }
             }
 
@@ -658,7 +701,7 @@ export const useWhisper: UseWhisperHook = (config) => {
       const response = await axios.post(endpoint + mode, body, {
         headers,
       })
-      return response.data.text
+      return response.data
     },
     [apiKey, mode, whisperConfig]
   )
@@ -672,6 +715,6 @@ export const useWhisper: UseWhisperHook = (config) => {
     startRecording,
     stopRecording,
     reset,
-    transcribeFileBlob
+    transcribeFileBlob,
   }
 }
