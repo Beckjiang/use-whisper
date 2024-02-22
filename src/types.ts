@@ -34,6 +34,7 @@ export type UseWhisperTranscript = {
   blob?: Blob
   text?: string
   segment?: Segment
+  segments?: Segment[]
   stopped?: boolean
 }
 

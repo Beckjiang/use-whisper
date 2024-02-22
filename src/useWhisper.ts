@@ -454,11 +454,12 @@ export const useWhisper: UseWhisperHook = (config) => {
   }
 
   const doTranscribing = async (blob: Blob, type?: string) => {
-    setTranscript((prev) => ({
-      ...prev,
-      blob,
-    }))
+    // setTranscript((prev) => ({
+    //   ...prev,
+    //   blob,
+    // }))
     let text = ''
+    let result: UseWhisperTranscript = {}
     if (typeof onTranscribeCallback === 'function') {
       const transcribed = await onTranscribeCallback(blob)
       console.log('onTranscribe', transcribed)
@@ -467,6 +468,7 @@ export const useWhisper: UseWhisperHook = (config) => {
         onTranscribeFinishedCallback(transcribed.text || '', blob)
       }
       text = transcribed.text || ''
+      // TODO: result
     } else {
       const fileType = type || 'audio/mpeg'
       const fileExt = fileTypeExtMap[fileType]
@@ -475,16 +477,20 @@ export const useWhisper: UseWhisperHook = (config) => {
       const transcribeResult = await onWhispered(file)
       text = transcribeResult.text || ''
       console.log('onTranscribing', { text })
-      setTranscript({
+      result = {
+        start: startTime.current || 0,
+        end: startTime.current + transcribeResult.duration,
         text,
-      })
+        blob,
+      }
+      setTranscript(result)
 
       if (typeof onTranscribeFinishedCallback === 'function') {
         onTranscribeFinishedCallback(text || '', blob)
       }
     }
     setTranscribing(false)
-    return text || ''
+    return result
   }
 
   /**
@@ -601,7 +607,6 @@ export const useWhisper: UseWhisperHook = (config) => {
         }
         const recorderState = await recorder.current.getState()
         if (recorderState === 'recording') {
-          const sliceCount = transcribeSliceCount || 10
           // 切割音频后5块数据
           const blob = new Blob(currentSection.current, {
             type: 'audio/mpeg',
@@ -611,43 +616,12 @@ export const useWhisper: UseWhisperHook = (config) => {
           })
           const text = await onWhispered(file)
           // console.log('onInterim', { text })
-          let segment: Segment | null = null
           if (text && timeSlice) {
-            if (timeSlice) {
-              /* 
-              timeSlice = 2000
-              transcribeSliceCount = 5
-
-              index  start  end
-              1       0     2000
-              2       0     4000
-              3       0     6000
-              4       0     8000
-              5       0     10000
-              6       2000  12000
-              7       4000  14000
-              8       6000  16000
-              9       8000  18000
-              10      10000 20000
-              */
-
-              const end = nums * timeSlice
-              // start 最小为0
-              const start = Math.max(0, end - sliceCount * timeSlice)
-              segment = {
-                start,
-                end,
-                text,
-                stopped: false,
-              }
-            }
-
-            console.log('onInterim', { text, segment })
+            console.log('onInterim', { text })
 
             setTranscript((prev) => ({
               ...prev,
               text,
-              segment: segment ? segment : prev.segment,
             }))
           }
         }
