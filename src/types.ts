@@ -47,7 +47,10 @@ export type UseWhisperReturn = {
   startRecording: () => Promise<void>
   stopRecording: () => Promise<void>
   reset: () => Promise<void>
-  transcribeFileBlob: (blob: Blob, type: string) => Promise<string | undefined>
+  transcribeFileBlob: (
+    blob: Blob,
+    type: string
+  ) => Promise<UseWhisperTranscript | undefined>
 }
 
 export type UseWhisperHook = (config?: UseWhisperConfig) => UseWhisperReturn

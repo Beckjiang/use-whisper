@@ -32,7 +32,7 @@ const defaultConfig: UseWhisperConfig = {
   stopTimeout: defaultStopTimeout,
   streaming: false,
   timeSlice: 1_000,
-  transcribeSliceCount: 10,
+  // transcribeSliceCount: 10,
   onDataAvailable: undefined,
   onTranscribe: undefined,
 }
@@ -74,7 +74,6 @@ export const useWhisper: UseWhisperHook = (config) => {
     stopTimeout,
     streaming,
     timeSlice,
-    transcribeSliceCount,
     whisperConfig,
     onStartRecording: onStartRecordingCallback,
     onDataAvailable: onDataAvailableCallback,
@@ -307,13 +306,15 @@ export const useWhisper: UseWhisperHook = (config) => {
   const onStopSpeaking = () => {
     console.log('stop speaking')
     setSpeaking(false)
-    const copy_section = currentSection.current.slice()
+    const copy_section = [...currentSection.current]
+    currentSection.current = []
     const data = new Blob(copy_section, {
       type: 'audio/mpeg',
     })
 
-    doTranscribing(data).then(() => {
+    doTranscribing(data, 'audio/mpeg', true).then((res) => {
       console.log('after onStopSpeaking doTranscribing')
+      console.log(res)
     })
 
     if (nonStop) {
@@ -351,7 +352,7 @@ export const useWhisper: UseWhisperHook = (config) => {
       return elapsedTime.current + (Date.now() - startTime.current)
     } else {
       // 如果不在录音，返回已录制的总时间
-      return elapsedTime
+      return elapsedTime.current
     }
   }
 
@@ -453,7 +454,11 @@ export const useWhisper: UseWhisperHook = (config) => {
     }
   }
 
-  const doTranscribing = async (blob: Blob, type?: string) => {
+  const doTranscribing = async (
+    blob: Blob,
+    type?: string,
+    stopped?: boolean
+  ) => {
     // setTranscript((prev) => ({
     //   ...prev,
     //   blob,
@@ -476,13 +481,14 @@ export const useWhisper: UseWhisperHook = (config) => {
       const file = new File([blob], 'speech.' + fileExt, { type: fileType })
       const transcribeResult = await onWhispered(file)
       text = transcribeResult.text || ''
-      console.log('onTranscribing', { text })
       result = {
-        start: startTime.current || 0,
-        end: startTime.current + transcribeResult.duration,
+        start: getCurrentRecordingTime() || 0,
+        end: getCurrentRecordingTime() + transcribeResult.duration,
         text,
         blob,
+        stopped: stopped || false,
       }
+      console.log('onTranscribing result', result)
       setTranscript(result)
 
       if (typeof onTranscribeFinishedCallback === 'function') {
@@ -614,7 +620,8 @@ export const useWhisper: UseWhisperHook = (config) => {
           const file = new File([blob], 'speech.mp3', {
             type: 'audio/mpeg',
           })
-          const text = await onWhispered(file)
+          const resp = await onWhispered(file)
+          const text = resp.text
           // console.log('onInterim', { text })
           if (text && timeSlice) {
             console.log('onInterim', { text })
@@ -622,6 +629,7 @@ export const useWhisper: UseWhisperHook = (config) => {
             setTranscript((prev) => ({
               ...prev,
               text,
+              stopped: false,
             }))
           }
         }
