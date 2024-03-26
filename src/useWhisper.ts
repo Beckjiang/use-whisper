@@ -57,6 +57,7 @@ const fileTypeExtMap = {
   'audio/ogg': 'ogg',
   'audio/wav': 'wav',
   'audio/mpeg': 'mp3',
+  'audio/m4a': 'm4a',
 }
 
 /**
@@ -487,6 +488,7 @@ export const useWhisper: UseWhisperHook = (config) => {
         text,
         blob,
         stopped: stopped || false,
+        segments: transcribeResult.segments || [],
       }
       console.log('onTranscribing result', result)
       setTranscript(result)
