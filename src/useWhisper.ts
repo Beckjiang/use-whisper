@@ -3,7 +3,8 @@ import type { RawAxiosRequestHeaders } from 'axios'
 import type { Harker } from 'hark'
 import type { Encoder } from 'lamejs'
 import { useEffect, useRef, useState } from 'react'
-import type { Options, RecordRTCPromisesHandler } from 'recordrtc'
+// import type { Options, RecordRTCPromisesHandler } from 'recordrtc'
+import { CustomRTCPromisesHandler } from './record'
 import {
   defaultStopTimeout,
   ffmpegCoreUrl,
@@ -11,7 +12,6 @@ import {
   whisperApiEndpoint,
 } from './configs'
 import {
-  Segment,
   UseWhisperConfig,
   UseWhisperHook,
   UseWhisperTimeout,
@@ -32,7 +32,7 @@ const defaultConfig: UseWhisperConfig = {
   stopTimeout: defaultStopTimeout,
   streaming: false,
   timeSlice: 1_000,
-  // transcribeSliceCount: 10,
+  transcribeSliceCount: 10,
   onDataAvailable: undefined,
   onTranscribe: undefined,
 }
@@ -92,7 +92,7 @@ export const useWhisper: UseWhisperHook = (config) => {
   const chunks = useRef<Blob[]>([])
   const encoder = useRef<Encoder>()
   const listener = useRef<Harker>()
-  const recorder = useRef<RecordRTCPromisesHandler>()
+  const recorder = useRef<CustomRTCPromisesHandler>()
   const stream = useRef<MediaStream>()
   const timeout = useRef<UseWhisperTimeout>(defaultTimeout)
 
@@ -197,20 +197,29 @@ export const useWhisper: UseWhisperHook = (config) => {
       }
       if (stream.current) {
         if (!recorder.current) {
-          const {
-            default: { RecordRTCPromisesHandler, StereoAudioRecorder },
-          } = await import('recordrtc')
-          const recorderConfig: Options = {
-            mimeType: 'audio/wav',
-            numberOfAudioChannels: 1, // mono
-            recorderType: StereoAudioRecorder,
-            sampleRate: 44100, // Sample rate = 44.1khz
-            timeSlice: streaming ? timeSlice : undefined,
-            type: 'audio',
+          // const {
+          //   default: { RecordRTCPromisesHandler, StereoAudioRecorder },
+          // } = await import('recordrtc')
+          // const recorderConfig: Options = {
+          //   mimeType: 'audio/wav',
+          //   numberOfAudioChannels: 1, // mono
+          //   recorderType: StereoAudioRecorder,
+          //   sampleRate: 44100, // Sample rate = 44.1khz
+          //   timeSlice: streaming ? timeSlice : undefined,
+          //   type: 'audio',
+          //   ondataavailable:
+          //     autoTranscribe && streaming ? onDataAvailable : undefined,
+          // }
+          const recorderConfig = {
+            mimeType: 'audio/webm',
             ondataavailable:
               autoTranscribe && streaming ? onDataAvailable : undefined,
+            onstopped: (blob: Blob) => {
+              console.log('onstopped', blob)
+            },
+            timeSlice: streaming ? timeSlice : undefined,
           }
-          recorder.current = new RecordRTCPromisesHandler(
+          recorder.current = new CustomRTCPromisesHandler(
             stream.current,
             recorderConfig
           )
@@ -310,10 +319,10 @@ export const useWhisper: UseWhisperHook = (config) => {
     const copy_section = [...currentSection.current]
     currentSection.current = []
     const data = new Blob(copy_section, {
-      type: 'audio/mpeg',
+      type: 'audio/webm',
     })
 
-    doTranscribing(data, 'audio/mpeg', true).then((res) => {
+    doTranscribing(data, 'audio/webm', true).then((res) => {
       console.log('after onStopSpeaking doTranscribing')
       console.log(res)
     })
@@ -403,12 +412,14 @@ export const useWhisper: UseWhisperHook = (config) => {
         if (autoTranscribeOnStop) {
           await onTranscribing()
         } else {
-          const blob = await recorder.current.getBlob()
+          const blob_webm = await recorder.current.getBlob()
+
           setTranscript({
-            blob,
+            blob: blob_webm,
           })
           if (typeof onTranscribeFinishedCallback === 'function') {
-            onTranscribeFinishedCallback('', blob)
+            console.log('onstop', blob_webm.size)
+            onTranscribeFinishedCallback('', blob_webm)
           }
         }
         await recorder.current.destroy()
@@ -470,13 +481,13 @@ export const useWhisper: UseWhisperHook = (config) => {
       const transcribed = await onTranscribeCallback(blob)
       console.log('onTranscribe', transcribed)
       setTranscript(transcribed)
-      if (typeof onTranscribeFinishedCallback === 'function') {
-        onTranscribeFinishedCallback(transcribed.text || '', blob)
-      }
+      // if (typeof onTranscribeFinishedCallback === 'function') {
+      //   onTranscribeFinishedCallback(transcribed.text || '', blob)
+      // }
       text = transcribed.text || ''
       // TODO: result
     } else {
-      const fileType = type || 'audio/mpeg'
+      const fileType = type || 'audio/webm'
       const fileExt = fileTypeExtMap[fileType]
 
       const file = new File([blob], 'speech.' + fileExt, { type: fileType })
@@ -493,9 +504,9 @@ export const useWhisper: UseWhisperHook = (config) => {
       console.log('onTranscribing result', result)
       setTranscript(result)
 
-      if (typeof onTranscribeFinishedCallback === 'function') {
-        onTranscribeFinishedCallback(text || '', blob)
-      }
+      // if (typeof onTranscribeFinishedCallback === 'function') {
+      //   onTranscribeFinishedCallback(text || '', blob)
+      // }
     }
     setTranscribing(false)
     return result
@@ -532,10 +543,10 @@ export const useWhisper: UseWhisperHook = (config) => {
             }
             const buffer = await blob.arrayBuffer()
             console.log({ in: buffer.byteLength })
-            ffmpeg.FS('writeFile', 'in.wav', new Uint8Array(buffer))
+            ffmpeg.FS('writeFile', 'in.webm', new Uint8Array(buffer))
             await ffmpeg.run(
               '-i', // Input
-              'in.wav',
+              'in.webm',
               '-acodec', // Audio codec
               'libmp3lame',
               '-b:a', // Audio bitrate
@@ -544,9 +555,9 @@ export const useWhisper: UseWhisperHook = (config) => {
               '44100',
               '-af', // Audio filter = remove silence from start to end with 2 seconds in between
               silenceRemoveCommand,
-              'out.mp3' // Output
+              'out.webm' // Output
             )
-            const out = ffmpeg.FS('readFile', 'out.mp3')
+            const out = ffmpeg.FS('readFile', 'out.webm')
             console.log({ out: out.buffer.byteLength })
             // 225 seems to be empty mp3 file
             if (out.length <= 225) {
@@ -557,20 +568,18 @@ export const useWhisper: UseWhisperHook = (config) => {
               setTranscribing(false)
               return
             }
-            blob = new Blob([out.buffer], { type: 'audio/mpeg' })
+            blob = new Blob([out.buffer], { type: 'audio/webm' })
             ffmpeg.exit()
 
             await doTranscribing(blob)
           } else {
             const buffer = await blob.arrayBuffer()
             console.log({ wav: buffer.byteLength })
-            let mp3: Int8Array | undefined = undefined
             if (workerRef.current) {
-              workerRef.current.postMessage({ command: 'encode', data: buffer })
+              workerRef.current.postMessage({ command: 'encode', data: blob })
 
               workerRef.current.onmessage = (event) => {
-                const mp3 = event.data
-                const blob = new Blob([mp3], { type: 'audio/mpeg' })
+                const blob = event.data
                 // ...后续操作
                 doTranscribing(blob).then(() => {
                   console.log(
@@ -579,9 +588,9 @@ export const useWhisper: UseWhisperHook = (config) => {
                 })
               }
             } else {
-              mp3 = encoder.current.encodeBuffer(new Int16Array(buffer))
-              blob = new Blob([mp3], { type: 'audio/mpeg' })
-              console.log({ blob, mp3: mp3.byteLength })
+              // mp3 = encoder.current.encodeBuffer(new Int16Array(buffer))
+              // blob = new Blob([mp3], { type: 'audio/webm' })
+              console.log({ blob, length: blob.size })
               await doTranscribing(blob)
               console.log('after encoder.current.encodeBuffer doTranscribing')
             }
@@ -607,20 +616,20 @@ export const useWhisper: UseWhisperHook = (config) => {
       if (streaming && recorder.current) {
         onDataAvailableCallback?.(data)
         if (encoder.current) {
-          const buffer = await data.arrayBuffer()
-          const mp3chunk = encoder.current.encodeBuffer(new Int16Array(buffer))
-          const mp3blob = new Blob([mp3chunk], { type: 'audio/mpeg' })
-          chunks.current.push(mp3blob)
-          currentSection.current.push(mp3blob)
+          // const buffer = await data.arrayBuffer()
+          // const mp3chunk = encoder.current.encodeBuffer(new Int16Array(buffer))
+          // const mp3blob = new Blob([mp3chunk], { type: 'audio/mpeg' })
+          chunks.current.push(data)
+          currentSection.current.push(data)
         }
         const recorderState = await recorder.current.getState()
         if (recorderState === 'recording') {
           // 切割音频后5块数据
-          const blob = new Blob(currentSection.current, {
-            type: 'audio/mpeg',
+          const blob = new Blob(chunks.current.slice(-10), {
+            type: 'audio/webm',
           })
-          const file = new File([blob], 'speech.mp3', {
-            type: 'audio/mpeg',
+          const file = new File([blob], 'speech.webm', {
+            type: 'audio/webm',
           })
           const resp = await onWhispered(file)
           const text = resp.text

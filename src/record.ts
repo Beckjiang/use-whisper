@@ -1,8 +1,9 @@
-type State = 'inactive' | 'recording' | 'paused'
+type State = 'inactive' | 'recording' | 'paused' | 'stopped'
 
 interface Options {
   mimeType?: string
   ondataavailable?: (blob: Blob) => void
+  onstopped?: (blob: Blob) => void
   timeSlice?: number
 }
 
@@ -40,6 +41,7 @@ class CustomRTCPromisesHandler {
       this.mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           this.chunks.push(event.data)
+          console.log('data available', this.chunks)
 
           // If ondataavailable callback is provided and timeSlice is set
           if (this.options.ondataavailable && this.options.timeSlice) {
@@ -52,7 +54,11 @@ class CustomRTCPromisesHandler {
         this.blob = new Blob(this.chunks, {
           type: this.options.mimeType || 'video/webm',
         })
+        console.log('mimeType: ', this.options.mimeType)
+        console.log('chunks: ', this.chunks)
+        console.log('blob: ', this.blob)
         this.chunks = []
+        this.options.onstopped && this.options.onstopped(this.blob)
       }
     } else {
       throw new Error('MimeType not supported')
@@ -136,47 +142,50 @@ class CustomRTCPromisesHandler {
   }
 }
 
-const startButton = document.getElementById('start')
-const pauseButton = document.getElementById('pause')
-const resumeButton = document.getElementById('resume')
-const stopButton = document.getElementById('stop')
-const playButton = document.getElementById('play')
-const audioElement = document.getElementById('audio') as HTMLAudioElement
+export { CustomRTCPromisesHandler }
 
-let handler: CustomRTCPromisesHandler
+// const startButton = document.getElementById('start')
+// const pauseButton = document.getElementById('pause')
+// const resumeButton = document.getElementById('resume')
+// const stopButton = document.getElementById('stop')
+// const playButton = document.getElementById('play')
+// const audioElement = document.getElementById('audio') as HTMLAudioElement
 
-startButton?.addEventListener('click', async () => {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-  handler = new CustomRTCPromisesHandler(stream, {
-    mimeType: 'audio/webm',
-    timeSlice: 1000,
-    ondataavailable: (blob) => {
-      console.log(blob)
-    },
-  })
-  await handler.startRecording()
+// let handler: CustomRTCPromisesHandler
 
-  //   startButton && startButton.disabled;
-  //   stopButton && stopButton.disabled = false;
-})
+// startButton?.addEventListener('click', async () => {
+//   const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+//   handler = new CustomRTCPromisesHandler(stream, {
+//     mimeType: 'audio/webm',
+//     timeSlice: 1000,
+//     ondataavailable: (blob) => {
+//       console.log(blob)
+//     },
+//     onstopped: (blob) => {
+//       console.log(blob)
+//       audioElement.src = URL.createObjectURL(blob)
+//       console.log(audioElement.src)
+//     },
+//   })
+//   await handler.startRecording()
 
-pauseButton?.addEventListener('click', async () => {
-  await handler.pauseRecording()
-})
+//   //   startButton && startButton.disabled;
+//   //   stopButton && stopButton.disabled = false;
+// })
 
-resumeButton?.addEventListener('click', async () => {
-  await handler.resumeRecording()
-})
+// pauseButton?.addEventListener('click', async () => {
+//   await handler.pauseRecording()
+// })
 
-stopButton?.addEventListener('click', async () => {
-  const audioURL = await handler.stopRecording()
-  audioElement.src = audioURL
+// resumeButton?.addEventListener('click', async () => {
+//   await handler.resumeRecording()
+// })
 
-  //   startButton && startButton.disabled = false;
-  //   stopButton && stopButton.disabled = true;
-  //   playButton && playButton.disabled = false;
-})
+// stopButton?.addEventListener('click', async () => {
+//   await handler.stopRecording()
+//   // audioElement.src = audioURL
+// })
 
-playButton?.addEventListener('click', () => {
-  audioElement.play()
-})
+// playButton?.addEventListener('click', () => {
+//   audioElement.play()
+// })
