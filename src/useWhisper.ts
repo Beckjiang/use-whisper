@@ -76,6 +76,7 @@ export const useWhisper: UseWhisperHook = (config) => {
     streaming,
     timeSlice,
     whisperConfig,
+    transcribeSliceCount,
     onStartRecording: onStartRecordingCallback,
     onDataAvailable: onDataAvailableCallback,
     onTranscribe: onTranscribeCallback,
@@ -105,6 +106,7 @@ export const useWhisper: UseWhisperHook = (config) => {
   const workerRef = useRef<Worker | null>(null)
   const sliceNums = useRef<number>(1)
   const currentSection = useRef<Blob[]>([])
+  const mp3blobChunks = useRef<Blob[]>([])
   const elapsedTime = useRef<number>(0)
   const startTime = useRef<number>(0)
 
@@ -119,6 +121,9 @@ export const useWhisper: UseWhisperHook = (config) => {
   useEffect(() => {
     return () => {
       if (chunks.current) {
+        chunks.current = []
+      }
+      if (mp3blobChunks.current) {
         chunks.current = []
       }
       if (encoder.current) {
@@ -424,6 +429,7 @@ export const useWhisper: UseWhisperHook = (config) => {
         }
         await recorder.current.destroy()
         chunks.current = []
+        mp3blobChunks.current = []
         if (encoder.current) {
           encoder.current.flush()
           encoder.current = undefined
@@ -612,24 +618,29 @@ export const useWhisper: UseWhisperHook = (config) => {
   const onDataAvailable = async (data: Blob) => {
     const nums = sliceNums.current++
     console.log('onDataAvailable', data, nums)
+    const slice_count = (transcribeSliceCount || 10) * -1
     try {
       if (streaming && recorder.current) {
         onDataAvailableCallback?.(data)
         if (encoder.current) {
-          // const buffer = await data.arrayBuffer()
-          // const mp3chunk = encoder.current.encodeBuffer(new Int16Array(buffer))
-          // const mp3blob = new Blob([mp3chunk], { type: 'audio/mpeg' })
+          const buffer = await data.arrayBuffer()
+          const mp3chunk = encoder.current.encodeBuffer(new Int16Array(buffer))
+          const mp3blob = new Blob([mp3chunk], { type: 'audio/mpeg' })
+          mp3blobChunks.current.push(mp3blob)
+
           chunks.current.push(data)
           currentSection.current.push(data)
         }
+
         const recorderState = await recorder.current.getState()
         if (recorderState === 'recording') {
           // 切割音频后5块数据
-          const blob = new Blob(chunks.current.slice(-10), {
-            type: 'audio/webm',
+          
+          const blob = new Blob(mp3blobChunks.current.slice(slice_count), {
+            type: 'audio/mpeg',
           })
-          const file = new File([blob], 'speech.webm', {
-            type: 'audio/webm',
+          const file = new File([blob], 'speech.mp3', {
+            type: 'audio/mpeg',
           })
           const resp = await onWhispered(file)
           const text = resp.text
