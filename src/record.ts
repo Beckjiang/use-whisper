@@ -114,7 +114,11 @@ class CustomRTCPromisesHandler {
   }
 
   async getBlob(): Promise<Blob> {
-    if (!this.blob) throw new Error('Recording not available.')
+    if (!this.blob) {
+      return new Blob(this.chunks, {
+        type: this.options.mimeType || 'video/webm',
+      })
+    }
     return this.blob
   }
 

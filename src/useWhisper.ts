@@ -18,6 +18,7 @@ import {
   UseWhisperTranscript,
 } from './types'
 
+
 /**
  * default useWhisper configuration
  */
@@ -96,6 +97,7 @@ export const useWhisper: UseWhisperHook = (config) => {
   const recorder = useRef<CustomRTCPromisesHandler>()
   const stream = useRef<MediaStream>()
   const timeout = useRef<UseWhisperTimeout>(defaultTimeout)
+  const ffmpegRef = useRef<any>()
 
   const [recording, setRecording] = useState<boolean>(false)
   const [speaking, setSpeaking] = useState<boolean>(false)
@@ -119,6 +121,14 @@ export const useWhisper: UseWhisperHook = (config) => {
    * - stop all user's media steaming track and remove it from ref
    */
   useEffect(() => {
+    ;(async () => {
+      if (!ffmpegRef.current) {
+        const { createFFmpeg } = await import('@ffmpeg/ffmpeg')
+        const ffmpeg = createFFmpeg({ log: true })
+        ffmpegRef.current = ffmpeg
+        await ffmpeg.load()
+      }
+    })()
     return () => {
       if (chunks.current) {
         chunks.current = []
@@ -133,6 +143,10 @@ export const useWhisper: UseWhisperHook = (config) => {
       if (recorder.current) {
         recorder.current.destroy()
         recorder.current = undefined
+      }
+      if (ffmpegRef.current) {
+        ffmpegRef.current.exit()
+        ffmpegRef.current = undefined
       }
       onStopTimeout('stop')
       if (listener.current) {
@@ -233,6 +247,14 @@ export const useWhisper: UseWhisperHook = (config) => {
           const { Mp3Encoder } = await import('lamejs')
           encoder.current = new Mp3Encoder(1, 44100, 96)
         }
+        // 使用ffmpeg切割音频最新的20秒
+        if (!ffmpegRef.current) {
+          const { createFFmpeg } = await import('@ffmpeg/ffmpeg')
+          const ffmpeg = createFFmpeg({ log: true })
+          await ffmpeg.load()
+          ffmpegRef.current = ffmpeg
+        }
+
         if (!workerRef.current) {
           workerRef.current = new Worker(
             new URL('./worker.js', import.meta.url)
@@ -623,10 +645,10 @@ export const useWhisper: UseWhisperHook = (config) => {
       if (streaming && recorder.current) {
         onDataAvailableCallback?.(data)
         if (encoder.current) {
-          const buffer = await data.arrayBuffer()
-          const mp3chunk = encoder.current.encodeBuffer(new Int16Array(buffer))
-          const mp3blob = new Blob([mp3chunk], { type: 'audio/mpeg' })
-          mp3blobChunks.current.push(mp3blob)
+          // const buffer = await data.arrayBuffer()
+          // const mp3chunk = encoder.current.encodeBuffer(new Int16Array(buffer))
+          // const mp3blob = new Blob([mp3chunk], { type: 'audio/mpeg' })
+          // mp3blobChunks.current.push(mp3blob)
 
           chunks.current.push(data)
           currentSection.current.push(data)
@@ -635,13 +657,41 @@ export const useWhisper: UseWhisperHook = (config) => {
         const recorderState = await recorder.current.getState()
         if (recorderState === 'recording') {
           // 切割音频后5块数据
-          
-          const blob = new Blob(mp3blobChunks.current.slice(slice_count), {
-            type: 'audio/mpeg',
-          })
-          const file = new File([blob], 'speech.mp3', {
-            type: 'audio/mpeg',
-          })
+          // 使用ffmpeg切割音频最新的20秒
+          if (!ffmpegRef.current) {
+            const { createFFmpeg } = await import('@ffmpeg/ffmpeg')
+            const ffmpeg = createFFmpeg({ log: true })
+            await ffmpeg.load()
+            ffmpegRef.current = ffmpeg
+          }
+
+          const dataBlob = new Blob(chunks.current, { type: 'audio/webm' })
+          ffmpegRef.current.FS(
+            'writeFile',
+            'input.webm',
+            new Uint8Array(await dataBlob.arrayBuffer())
+          )
+          const total_length = chunks.current.length
+          const timeSliceSecond = (timeSlice || 2000) / 1000
+          const startSeconds =
+            Math.max(0, total_length - (transcribeSliceCount || 10)) *
+            timeSliceSecond
+          const sliceLength = (transcribeSliceCount || 10) * timeSliceSecond
+
+          await ffmpegRef.current.run(
+            '-ss',
+            String(startSeconds), // 设置起始时间点
+            '-i',
+            'input.webm', // 输入文件
+            '-t',
+            String(sliceLength), // 设置截取时长
+            '-c',
+            'copy',
+            'output.webm'
+          )
+          const output = ffmpegRef.current.FS('readFile', 'output.webm')
+          const blob = new Blob([output.buffer], { type: 'audio/webm' })
+          const file = new File([blob], 'speech.webm', { type: 'audio/webm' })
           const resp = await onWhispered(file)
           const text = resp.text
           // console.log('onInterim', { text })
